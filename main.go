@@ -2,19 +2,21 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 )
 
 type Message struct{
-	from stringpayload []byte
+	from	string
+	payload	[]byte
 }
 
-type Server struct {
+type Server struct { 
 	listenAddr	string
 	ln 			net.Listener
 	quitch 		chan struct{}
-	msgch 		make(chan Message, 10),
+	msgch 		chan Message
 }
 
 
@@ -22,7 +24,7 @@ func NewServer(listenAddr string) *Server {
 	return &Server{
 		listenAddr:	listenAddr,
 		quitch:		make(chan struct{}),
-		msgch:      make(chan []byte, 10),
+		msgch:      make(chan Message),
 	}
 	
 }
@@ -31,9 +33,11 @@ func NewServer(listenAddr string) *Server {
 func (s *Server) Start() error {
 	ln, err := net.Listen("tcp", s.listenAddr)
 	if err != nil {
+		fmt.Println("Error starting server:", err)
 		return err
 	}
 	defer ln.Close()
+	fmt.Println("Server started on", s.listenAddr)
 	s.ln = ln
 
 	go s.acceptLoop()
@@ -49,7 +53,12 @@ func (s *Server) acceptLoop() {
 		conn, err := s.ln.Accept()
 		if err != nil{
 			fmt.Println("accept error:", err)
-			continue
+			select {
+			case <- s.quitch:
+				return
+			default:
+				continue
+			}
 		}
 
 		fmt.Println("new connection to server from addr: ", conn.RemoteAddr())
@@ -65,25 +74,33 @@ func (s *Server) readLoop(conn net.Conn) {
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
+			if err == io.EOF {
+				fmt.Println("connection closed by client: ", conn.RemoteAddr())
+				return
+			}
+			
 			fmt.Println("read error:", err)
-			continue
+			return
 		}
 
 		s.msgch <- Message{
-			from: conn.RemoteAddr().string(),
-			payload: buf[:n],
+			from: 		conn.RemoteAddr().String(),
+			payload:	buf[:n],
 		}
 	}
 }
 
 func main() {
 	server := NewServer(":3000")
+	fmt.Println("Starting server...")
+	go func() {
+		log.Fatal(server.Start())
+	}()
 
 	go func() { 
-		for msg:= range server.msgch{
-			fmt.Printf("received message from connection: (%s):%s\n ", string(msg.payload))
+		for msg := range server.msgch{
+			fmt.Printf("received message from connection: (%s):%s\n ", msg.from, string(msg.payload))
 		}
 		}()
 	
-	log.Fatal(server.Start())
 }
