@@ -51,12 +51,13 @@ func (s *Server) Start() error {
 func (s *Server) acceptLoop() {
 	for {
 		conn, err := s.ln.Accept()
-		if err != nil{
-			fmt.Println("accept error:", err)
+		if err != nil {
 			select {
-			case <- s.quitch:
+			case <-s.quitch:
+				fmt.Println("Server is shutting down.")
 				return
 			default:
+				fmt.Println("Accept error:", err)
 				continue
 			}
 		}
@@ -69,7 +70,11 @@ func (s *Server) acceptLoop() {
 }
 
 func (s *Server) readLoop(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		fmt.Println("Closing connection from:", conn.RemoteAddr())
+		conn.Close()
+	}()
+
 	buf := make([]byte, 2048)
 	for {
 		n, err := conn.Read(buf)
@@ -81,26 +86,37 @@ func (s *Server) readLoop(conn net.Conn) {
 			
 			fmt.Println("read error:", err)
 			return
+		
 		}
-
+		
+		
 		s.msgch <- Message{
 			from: 		conn.RemoteAddr().String(),
 			payload:	buf[:n],
 		}
+		receivedData := buf[:n]
+		fmt.Printf("Received %d bytes from %s\n", n, conn.RemoteAddr())
+		fmt.Printf("Received message from %s: %s\n", conn.RemoteAddr(), string(receivedData))
 	}
 }
 
 func main() {
 	server := NewServer(":3000")
 	fmt.Println("Starting server...")
+	server.Start()
+
 	go func() {
-		log.Fatal(server.Start())
+		if err := server.Start(); err != nil {
+			log.Fatal(err)
+		}
 	}()
 
 	go func() { 
 		for msg := range server.msgch{
+
+			fmt.Println(string(msg.payload))
 			fmt.Printf("received message from connection: (%s):%s\n ", msg.from, string(msg.payload))
 		}
 		}()
-	
-}
+	select {}
+}	
